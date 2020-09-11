@@ -2,7 +2,8 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-# from torch.utils.tensorboard import SummaryWriter
+
+from torch.utils.tensorboard import SummaryWriter
 
 from modules import DisplacementGenerator, DisplacementGeneratorPP 
 from losses import chamfer_distance
@@ -27,55 +28,63 @@ def main():
     lr = 0.001
     p_t = 0.8
     p_s = 0.1
-    num_epochs = 3
+    num_epochs = 100
     batch_size = 32
     numInferenceSampling = 20
     num_points = 2000
+    opt = 'Adam'
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     pointCloudPath = "/Users/meitarshechter/Git/Self-Sampling/data/guitar_scale.xyz"
 
-    # set paths
-    # checkpointPath = './GNN_model/CIFAR10_checkpoints/CP__num_e_{}__retrain_e_{}__lr_{}__opt_{}__useTemp_{}__useSteps_{}__epoch_{}.pt'.format(num_epochs, n_retrain_epochs, lr, opt, use_temp, use_steps, '{}')    
-    # continue_train = False
-    # checkpointLoadPath = './GNN_model/CIFAR10_checkpoints/CP__num_e_{}__retrain_e_{}__lr_{}__opt_{}__useTemp_{}__useSteps_{}__epoch_{}.pt'.format(num_epochs, n_retrain_epochs, lr, opt, use_temp, use_steps, '20')
+    ### set checkpoint-related stuff ###
+    checkpointPath = '/Users/meitarshechter/Git/Self-Sampling/checkpoints/CheckPoint__k_{}__p_s_{}__p_t_{}__bs_{}__num_points_{}__lr_{}__opt_{}__epoch_{}.pt'\
+                                                                                .format(k, p_s, p_t, batch_size, num_points, lr, opt, '{}')    
+    checkpointLoadPath = '/Users/meitarshechter/Git/Self-Sampling/checkpoints/CheckPoint__k_{}__p_s_{}__p_t_{}__bs_{}__num_points_{}__lr_{}__opt_{}__epoch_{}.pt'\
+                                                                                .format(k, p_s, p_t, batch_size, num_points, lr, opt, '20')    
+    continue_train = False
+    trainedModelPath = '/Users/meitarshechter/Git/Self-Sampling/trained_models/TrainedModel__k_{}__p_s_{}__p_t_{}__bs_{}__num_points_{}__lr_{}__opt_{}.pt'\
+                                                                                .format(k, p_s, p_t, batch_size, num_points, lr, opt)
 
     ### model-realted declarations ###
-    # model = DisplacementGenerator(output_channels=3).to(device) # expects (num_points, dim, 1)
-    model = DisplacementGeneratorPP().to(device) # expects (batch_size, dim, num_points)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    # optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=5e-4)
-    # scheduler = MultiStepLR(optimizer, milestones=[int(elem*num_epochs) for elem in [0.3, 0.6, 0.8]], gamma=0.2)
+    model = DisplacementGeneratorPP(num_classes=3).to(device) # expects (batch_size, dim, num_points)
+    model.apply(DisplacementGeneratorPP.weights_init) # initialize last FC layer to output near-zero displacements
+    if opt == 'Adam':
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    else:
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=5e-4)
+        scheduler = MultiStepLR(optimizer, milestones=[int(elem*num_epochs) for elem in [0.3, 0.6, 0.8]], gamma=0.2)
     crit = chamfer_distance
 
-    # declate TensorBoard writer
-    # summary_path = '{}-num_e_{}__retrain_e_{}__lr_{}__opt_{}__useTemp_{}__useSteps_{}/training'.format(network_name, num_epochs, n_retrain_epochs, lr, opt, use_temp, use_steps)
-    # writer = SummaryWriter(summary_path)
+    ### TensorBoard ###
+    summary_path = '/Users/meitarshechter/Git/Self-Sampling/summeries/CheckPoint__k_{}__p_s_{}__p_t_{}__bs_{}__num_points_{}__lr_{}__opt_{}/training'\
+                                                                                .format(k, p_s, p_t, batch_size, num_points, lr, opt)
+    writer = SummaryWriter(summary_path)
 
     ### prepare the sampler ###
     sampler = Sampler(pointCloud=pointCloudPath, curvyProbT=p_t, curvyProbS=p_s)
     sampler.preparePointCloud(k=k)
-    # train_dataset   = GraphDataset(root, network_name, isWRN, net_graph_path)
-    # train_loader    = DataLoader(train_dataset, batch_size=batch_size)
 
     ### start training ###
     model.train()
     print("Start training")
 
-    # if continue_train == True:
-    #     cp = torch.load(checkpointLoadPath, map_location=device)
-    #     trained_epochs = cp['epoch'] + 1
-    #     sd = cp['model_state_dict']
-    #     model.load_state_dict(sd)
-    #     op_sd = cp['optimizer_state_dict']
-    #     optimizer.load_state_dict(op_sd)
-    # else:
-    trained_epochs = 0
-    for epoch in range(trained_epochs, num_epochs):        
+    if continue_train == True:
+        cp = torch.load(checkpointLoadPath, map_location=device)
+        trained_epochs = cp['epoch'] + 1
+        sd = cp['model_state_dict']
+        model.load_state_dict(sd)
+        op_sd = cp['optimizer_state_dict']
+        optimizer.load_state_dict(op_sd)
+        if opt != 'Adam':
+            sc_sd = cp['scheduler_state_dict']
+            scheduler.load_state_dict(sc_sd)
+    else:
+        trained_epochs = 0
 
+    for epoch in range(trained_epochs, num_epochs):        
         loss_all = 0.0
         optimizer.zero_grad()
-        # for data in train_loader:
-        # for i in range(batch_size):
+
         # sample disjoint source and target sets
         source = sampler.sample(num_points=num_points, batch_size=batch_size, target=False, first_sampling=True)
         target = sampler.sample(num_points=num_points, batch_size=batch_size, target=True, first_sampling=False)
@@ -85,79 +94,66 @@ def main():
         # PointNet
         # source = torch.from_numpy(source).to(device).unsqueeze(-1)
         # target = torch.from_numpy(target).to(device).unsqueeze(0)
-        # PointNet++ without batch
-        # source = torch.from_numpy(source).to(device).unsqueeze(0).transpose(1, 2) # (batch_size, dim, num_points)
-        # target = torch.from_numpy(target).to(device).unsqueeze(0) # (batch_size, num_points, dim)
 
-        # data = data.to(device)
-        # optimizer.zero_grad()
-        # output = model(data)
         # calculate predicted target
         displacements = model(source.float()) # (batch_size, num_points, dim)
         predicted_target = source + displacements # (batch_size, num_points, dim)
-        # predicted_target = (source.squeeze(-1) + displacements).unsqueeze(0)
 
         # calcualae loss
         loss, _ = crit(target.float(), predicted_target.float(), point_reduction="sum")
         loss.backward()
         loss_all += loss.item()
-        print("epoch {}. loss is: {}".format(epoch+1, loss_all / batch_size))
-        # end for
+        print("epoch {}. loss is: {}".format(epoch+1, loss_all))
+
         optimizer.step()
         
-        # if opt != "Adam":
-        #     scheduler.step()
+        if opt != "Adam":
+            scheduler.step()
 
-        # if epoch % 10 == 9:
-        #     writer.add_scalars('Learning curve', {
-        #     'loss data term': data_all/10,
-        #     'loss sparsity term': sparse_all/10,
-        #     'training loss': loss_all/10
-        #     }, epoch+1)            
+        # save checkpoint every 10 epochs
+        if epoch % 10 == 9:
+            writer.add_scalars('Learning curve', {
+            'training loss': loss_all
+            }, epoch+1)            
 
-        #     # save checkpoint
-        #     if opt == "Adam":
-        #         torch.save({
-        #         'epoch': epoch,
-        #         'model_state_dict': model.state_dict(),
-        #         'optimizer_state_dict': optimizer.state_dict(),
-        #         'loss': loss_all,
-        #         }, checkpointPath.format(epoch+1))
-        #     else:
-        #         torch.save({
-        #         'epoch': epoch,
-        #         'model_state_dict': model.state_dict(),
-        #         'optimizer_state_dict': optimizer.state_dict(),
-        #         'loss': loss_all,
-        #         'scheduler_state_dict': scheduler.state_dict(),
-        #         }, checkpointPath.format(epoch+1))
+            # save checkpoint
+            if opt == "Adam":
+                torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': loss_all,
+                }, checkpointPath.format(epoch+1))
+            else:
+                torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': loss_all,
+                'scheduler_state_dict': scheduler.state_dict(),
+                }, checkpointPath.format(epoch+1))
 
+    ### save trained model ###
+    torch.save(model.state_dict(), trainedModelPath)            
 
     ### start evaluating ###
     print("Start evaluating")
-    # torch.save(model.state_dict(), trained_model_path)            
-    # model.load_state_dict(torch.load(trained_model_path, map_location=device))
+    # model.load_state_dict(torch.load(trainedModelPath, map_location=device))
     model.eval()
 
-    # network_val_data = datasets_test.get(dataset_name)
-    # val_data_loader = torch.utils.data.DataLoader(network_val_data, batch_size=1024, shuffle=False, num_workers=8) 
-
-    # save the upsampled point cloud
+    ### save the upsampled point cloud ###
     newPointCloudFilePath = '/Users/meitarshechter/Git/Self-Sampling/data/upscale_guitar.xyz'
     newPointCloudFile = open(newPointCloudFilePath, 'ab') 
+
     with torch.no_grad():
         for i in range(numInferenceSampling):
-        # for data in train_loader:
             sample = sampler.sample(num_points=num_points, uniform_sampling=True) 
-            # sample = torch.from_numpy(sample).to(device).unsqueeze(-1)
             sample = torch.from_numpy(sample).to(device) # (batch_size, num_points, dim)
 
-            displacements = model(sample)
-            # predicted_sample = sample.squeeze(-1) + displacements
+            displacements = model(sample.float())
             predicted_sample = sample + displacements # (batch_size, num_points, dim)
-
-            # np.savetxt(newPointCloudFile, predicted_sample.detach().numpy())
             np.savetxt(newPointCloudFile, predicted_sample.squeeze(0).detach().numpy())
+
     newPointCloudFile.close()
 
         # cuda_time = 0.0            

@@ -84,6 +84,10 @@ class Sampler():
         assert(self.flat_indices is not None)
         assert(self.all_indices is not None)
 
+        if num_points >= len(self.curvy_indices) or num_points >= len(self.flat_indices):
+            num_points = int(min(self.curvyProbS, self.curvyProbT) * min(len(self.curvy_indices), len(self.flat_indices)))
+            print("Warning: number of point to sample is too high, changing it to {}".format(num_points))
+
         samples = np.zeros((batch_size, num_points, 3))
 
         if uniform_sampling:

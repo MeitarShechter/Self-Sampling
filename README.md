@@ -1,2 +1,2 @@
 # Self-Sampling
-My implementation to self-sampling papaer
+My implementation to self-sampling paper
